@@ -6,6 +6,9 @@
 
 namespace evt {
 
+template <auto m>
+struct MemFnToFunc;
+
 namespace impl {
 
 template <typename T>
@@ -36,6 +39,32 @@ struct ExtractCallable<Ret(Args...), Cal> {
     }
 };
 
+template <typename Sig, auto m>
+struct ExtractMember;
+
+#define GENERATE(cvr)\
+template <typename Ret, typename Obj, typename ... Args, Ret(Obj::*m)(Args...) cvr>\
+struct ExtractMember<Ret(Args...), m> {\
+    static Ret Function(void* obj, Args ... args)\
+    {\
+        return (static_cast<MemFnToFuncAddRefT<Obj cvr>>(*static_cast<Obj*>(obj)).*m)(args...);\
+    }\
+};
+
+GENERATE()
+GENERATE(const)
+GENERATE(volatile)
+GENERATE(const volatile)
+GENERATE(&)
+GENERATE(const&)
+GENERATE(volatile&)
+GENERATE(const volatile&)
+GENERATE(&&)
+GENERATE(const&&)
+GENERATE(volatile&&)
+GENERATE(const volatile&&)
+#undef GENERATE
+
 template <typename T>
 class SubrangeFromPair {
     T beginIter;
@@ -64,10 +93,16 @@ struct AddVoidArg<Ret(Args...)> {
 template <typename T>
 using AddVoidArgT = typename AddVoidArg<T>::Type;
 
-}
+template <typename T>
+struct IsMemFnToFunc : std::false_type {};
 
-template <auto m>
-struct MemFnToFunc;
+template <template <auto> typename T, auto m>
+struct IsMemFnToFunc<T<m>> : std::true_type {};
+
+template <typename T>
+constexpr auto& IsMemFnToFuncV = IsMemFnToFunc<T>::value;
+
+}
 
 #define GENERATE(cvr)\
 template <typename Ret, typename Obj, typename ... Args, Ret (Obj::*m)(Args...) cvr>\
@@ -124,7 +159,24 @@ class EventManager {
     std::multimap<Key, Handler, KeyCompare> handlers;
 
 public:
-    template <typename Evt, typename Snd, typename C>
+    template <typename Evt, typename Snd>
+    void BindEventHandler(Evt& eventId, Snd& eventSender, typename EventTraits<Evt>::HandlerType& callable)
+    {
+        Handler handler;
+        handler.method = nullptr;
+        handler.static_func = reinterpret_cast<void(*)()>(&callable);
+        handlers.insert(std::make_pair(Key{(void*)&eventId, (void*)&eventSender}, handler));
+    }
+    template <typename Evt, typename Snd, auto m, typename = void /* SFINAE required */>
+    void BindEventHandler(Evt& eventId, Snd& eventSender, const MemFnToFunc<m>& callable)
+    {
+        Handler handler;
+        using HandlerType = typename EventTraits<std::remove_cv_t<Evt>>::HandlerType;
+        handler.method = reinterpret_cast<void(*)()>(impl::ExtractMember<HandlerType, m>::Function);
+        handler.obj = (void*)(&callable.self);
+        handlers.insert(std::make_pair(Key{(void*)&eventId, (void*)&eventSender}, handler));
+    }
+    template <typename Evt, typename Snd, typename C, typename = std::enable_if_t<!std::is_function_v<C> && !impl::IsMemFnToFuncV<C>>>
     void BindEventHandler(Evt& eventId, Snd& eventSender, C& callable)
     {
         Handler handler;
