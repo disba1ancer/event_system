@@ -4,20 +4,26 @@
 using std::cout;
 using std::endl;
 
-const struct TestEventT {
-    using HandlerType = void();
-} TestEvent;
+enum class Event {
+    SingleEvent
+};
 
 class SomeSender {
 };
 
-void free_func()
+template <>
+struct evt::event_traits<Event::SingleEvent>
+{
+    using handler = void(const SomeSender&);
+};
+
+void free_func(const SomeSender&)
 {
     cout << "Hello from free_func!" << endl;
 }
 
 struct SomeObserver {
-    void MemberObserver() const
+    void MemberObserver(const SomeSender&)
     {
         cout << "Hello from SomeObserver::MemberObserver!" << endl;
     }
@@ -25,15 +31,15 @@ struct SomeObserver {
 
 int main()
 {
-    evt::EventManager evMgr;
     SomeSender sender;
-    auto test = [](){
+    auto test = [](const SomeSender&){
         cout << "Hello from lambda!" << endl;
     };
     SomeObserver observer;
-    evMgr.BindEventHandler(TestEvent, sender, free_func);
-    evMgr.BindEventHandler(TestEvent, sender, test);
-    evMgr.BindEventHandler(TestEvent, sender, evt::MemFnToFunc<&SomeObserver::MemberObserver>(observer));
-    evMgr.SendEvent(TestEvent, sender);
+    evt::EventManager<Event> evMgr;
+    evMgr.Register<Event::SingleEvent>(free_func);
+    evMgr.Register<Event::SingleEvent>(test);
+    evMgr.Register<Event::SingleEvent>(observer, evt::fn_tag<&SomeObserver::MemberObserver>);
+    evMgr.Send<Event::SingleEvent>(sender);
     return 0;
 }
