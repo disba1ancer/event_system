@@ -204,45 +204,84 @@ class EventManager {
         }
     };
 
-    void RegisterInt(EventId event, void* object, void(*callback)())
+    bool RegisterInt(EventId event, void* object, void(*callback)())
     {
-        handlers.emplace(std::to_underlying(event), object, callback);
+        auto [it, r] = handlers.emplace(std::to_underlying(event), object, callback);
+        return r;
+    }
+
+    void UnregisterInt(EventId event, void* object, void(*callback)())
+    {
+        handlers.erase(Key{std::to_underlying(event), object, callback});
     }
     template <EventId event>
     using handler = typename event_traits<event>::handler;
 public:
     template <EventId event>
-    void Register(void* object, impl::AddVoidArgT<handler<event>>* callback)
+    bool Register(void* object, impl::AddVoidArgT<handler<event>>* callback)
     {
-        RegisterInt(event, object, reinterpret_cast<void(*)()>(callback));
+        return RegisterInt(event, object, reinterpret_cast<void(*)()>(callback));
     }
     template <EventId event>
-    void Register(handler<event>* m)
+    void Unregister(void* object, impl::AddVoidArgT<handler<event>>* callback)
+    {
+        UnregisterInt(event, object, reinterpret_cast<void(*)()>(callback));
+    }
+    template <EventId event>
+    bool Register(handler<event>* m)
     {
         auto object = reinterpret_cast<void*>(m);
         auto callback = impl::wrap_static<handler<event>>::function;
-        Register<event>(object, callback);
+        return Register<event>(object, callback);
+    }
+    template <EventId event>
+    void Unregister(handler<event>* m)
+    {
+        auto object = reinterpret_cast<void*>(m);
+        auto callback = impl::wrap_static<handler<event>>::function;
+        Unregister<event>(object, callback);
     }
     template <EventId event, typename Obs, auto m>
     requires (
         std::same_as<decltype(m), member_func_ptr_t<handler<event>, Obs&&>> ||
         std::same_as<decltype(m), member_func_ptr_t<handler<event>, std::remove_reference_t<Obs>>>
     )
-    void Register(Obs&& obs, fn_tag_t<m>)
+    bool Register(Obs&& obs, fn_tag_t<m>)
     {
         using handler_t = handler<event>;
         auto callback = impl::ExtractMember<handler_t, m>::Function;
         auto object = static_cast<void*>(std::addressof(obs));
-        Register<event>(object, callback);
+        return Register<event>(object, callback);
+    }
+    template <EventId event, typename Obs, auto m>
+    requires (
+        std::same_as<decltype(m), member_func_ptr_t<handler<event>, Obs&&>> ||
+        std::same_as<decltype(m), member_func_ptr_t<handler<event>, std::remove_reference_t<Obs>>>
+    )
+    void Unregister(Obs&& obs, fn_tag_t<m>)
+    {
+        using handler_t = handler<event>;
+        auto callback = impl::ExtractMember<handler_t, m>::Function;
+        auto object = static_cast<void*>(std::addressof(obs));
+        Unregister<event>(object, callback);
     }
     template <EventId event, typename C>
     requires (!std::is_function_v<C> && !impl::IsMemFnToFuncV<C>)
-    void Register(C&& callable)
+    bool Register(C&& callable)
     {
         using handler_t = handler<event>;
         auto callback = impl::ExtractCallable<handler_t, C>::Function;
         auto object = static_cast<void*>(std::addressof(callable));
-        Register<event>(object, callback);
+        return Register<event>(object, callback);
+    }
+    template <EventId event, typename C>
+    requires (!std::is_function_v<C> && !impl::IsMemFnToFuncV<C>)
+    void Unregister(C&& callable)
+    {
+        using handler_t = handler<event>;
+        auto callback = impl::ExtractCallable<handler_t, C>::Function;
+        auto object = static_cast<void*>(std::addressof(callable));
+        Unregister<event>(object, callback);
     }
     template <EventId event, typename ... Args>
     void Send(Args&& ... args)
@@ -262,7 +301,7 @@ public:
         }
     }
 private:
-    std::multiset<Key, KeyCompare> handlers;
+    std::set<Key, KeyCompare> handlers;
 };
 
 }

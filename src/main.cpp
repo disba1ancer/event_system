@@ -11,6 +11,12 @@ enum class Event {
 class SomeSender {
 };
 
+template <Event e>
+struct evt::event_traits<e>
+{
+    using handler = void(const SomeSender&, int);
+};
+
 template <>
 struct evt::event_traits<Event::SingleEvent>
 {
